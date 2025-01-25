@@ -1,5 +1,9 @@
 import { invalidateSessionsForUser } from '@avelin/auth'
-import { db, eq, schema, sql } from '@avelin/database'
+import { db, eq, schema, Session, sql, User } from '@avelin/database'
+import { jwtVerify, SignJWT } from 'jose'
+import { pick } from 'remeda'
+
+const AUTH_JWT_SECRET = process.env.AUTH_JWT_SECRET as string
 
 export async function linkAnonymousToRealAccount({
   anonymousUserId,
@@ -37,4 +41,28 @@ export async function linkAnonymousToRealAccount({
       })
       .where(eq(schema.users.id, anonymousUserId))
   })
+}
+
+export async function createSessionJwt(user: User, session: Session) {
+  const jwt = await new SignJWT({
+    ...pick(user, ['id', 'email', 'name', 'picture', 'isAnonymous']),
+    // roles: ['user'],
+    // permissions: ['read', 'write'],
+  })
+    .setProtectedHeader({ alg: 'HS256', typ: 'JWT' })
+    .setIssuedAt()
+    .setExpirationTime('1m')
+    .sign(new TextEncoder().encode(AUTH_JWT_SECRET))
+
+  return jwt
+}
+
+// Utility to decode and validate a JWT
+export async function validateSessionJwt(token: string) {
+  const { payload } = await jwtVerify(
+    token,
+    new TextEncoder().encode(AUTH_JWT_SECRET),
+  )
+
+  return payload
 }

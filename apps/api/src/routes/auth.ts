@@ -12,7 +12,11 @@ import { db } from '@avelin/database'
 import { decodeIdToken, OAuth2Tokens } from 'arctic'
 import Elysia, { t } from 'elysia'
 import type { Response } from 'undici-types'
-import { linkAnonymousToRealAccount } from '../utils/auth.utils'
+import {
+  createSessionJwt,
+  linkAnonymousToRealAccount,
+  validateSessionJwt,
+} from '../utils/auth.utils'
 import { authMiddleware } from '../middleware/auth'
 
 export const auth = new Elysia({ prefix: '/auth' })
@@ -48,27 +52,42 @@ export const auth = new Elysia({ prefix: '/auth' })
           }
         }
       })
-      .post('/anonymous', async ({ cookie: { avelin_session_id } }) => {
-        const user = await createAnonymousUser({ db })
-        const session = await createSession(user.id, { db })
+      .post(
+        '/anonymous',
+        async ({ cookie: { avelin_session_id, avelin_session_jwt } }) => {
+          const user = await createAnonymousUser({ db })
+          const session = await createSession(user.id, { db })
 
-        avelin_session_id?.set({
-          value: session.id,
-          path: '/',
-          httpOnly: true,
-          secure: process.env.NODE_ENV === 'production',
-          sameSite: 'lax',
-          expires: session.expiresAt,
-          domain: `.${process.env.BASE_DOMAIN}`,
-        })
+          const jwt = await createSessionJwt(user, session)
+          await validateSessionJwt(jwt)
 
-        return {
-          isAuthenticated: true,
-          isAnonymous: true,
-          user,
-          session,
-        }
-      })
+          avelin_session_id?.set({
+            value: session.id,
+            path: '/',
+            httpOnly: true,
+            secure: process.env.NODE_ENV === 'production',
+            sameSite: 'lax',
+            expires: session.expiresAt,
+            domain: `.${process.env.BASE_DOMAIN}`,
+          })
+
+          avelin_session_jwt?.set({
+            value: jwt,
+            path: '/',
+            httpOnly: false,
+            secure: process.env.NODE_ENV === 'production',
+            sameSite: 'lax',
+            domain: `.${process.env.BASE_DOMAIN}`,
+          })
+
+          return {
+            isAuthenticated: true,
+            isAnonymous: true,
+            user,
+            session,
+          }
+        },
+      )
       .get(
         '/google',
         async ({
